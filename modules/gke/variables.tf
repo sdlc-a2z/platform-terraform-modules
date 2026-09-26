@@ -28,9 +28,12 @@ variable "master_cidr" {
 
 variable "authorized_networks" {
   description = <<-EOT
-    CIDRs permitted to reach the Kubernetes API. Empty means nobody outside the VPC can,
-    which is the safe default — the API server is the cluster's front door and a public
-    endpoint with no allow-list is an invitation.
+    CIDRs permitted to reach the Kubernetes API from outside the VPC.
+
+    Empty means none, and that is enforced — the `master_authorized_networks_config` block
+    is always emitted. Omitting the block entirely does the opposite of what it looks like:
+    it *disables* authorised networks and GKE accepts the whole internet on the public
+    endpoint. This module shipped that way once.
   EOT
   type = list(object({
     cidr_block   = string

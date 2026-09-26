@@ -65,15 +65,25 @@ resource "google_container_cluster" "cluster" {
     master_ipv4_cidr_block  = var.master_cidr
   }
 
-  dynamic "master_authorized_networks_config" {
-    for_each = length(var.authorized_networks) > 0 ? [1] : []
-    content {
-      dynamic "cidr_blocks" {
-        for_each = var.authorized_networks
-        content {
-          cidr_block   = cidr_blocks.value.cidr_block
-          display_name = cidr_blocks.value.display_name
-        }
+  # ALWAYS emitted, never conditional. Omitting this block does not mean "no networks are
+  # authorised" — it means authorised networks are *disabled*, and GKE then accepts
+  # connections to the public endpoint from 0.0.0.0/0. Only Kubernetes authentication
+  # stands between the internet and the API server.
+  #
+  # This module shipped with the block behind `length(...) > 0`, so an empty list produced
+  # no block and an open endpoint. A `curl` to the endpoint returned 401 — TLS completed,
+  # the API answered — which is how it was found. An empty list must be the *most* closed
+  # configuration, not the least.
+  master_authorized_networks_config {
+    # Google's own published ranges. Without this, GKE's managed components and Cloud
+    # Console access break.
+    gcp_public_cidrs_access_enabled = false
+
+    dynamic "cidr_blocks" {
+      for_each = var.authorized_networks
+      content {
+        cidr_block   = cidr_blocks.value.cidr_block
+        display_name = cidr_blocks.value.display_name
       }
     }
   }
