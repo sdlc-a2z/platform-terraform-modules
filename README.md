@@ -59,12 +59,12 @@ if it is true of one deployment, it belongs in that deployment's repository.
 | Module | | Story |
 |---|---|---|
 | [`network`](modules/network) | VPC, four zones, firewall, NAT | `R0-WS1-001` |
-| `gke` | regional cluster, four node pools, Workload Identity | `R0-WS1-002` |
+| [`gke`](modules/gke) | cluster, node pools, gVisor, Workload Identity | `R0-WS1-002` |
 | `data` | Cloud SQL, Memorystore, Kafka, OpenSearch | `R0-WS1-004` |
 | `observability` | OTel Collector, Prometheus, Grafana | `R0-WS1-005` |
 | `temporal` | self-hosted cluster, own Postgres, Elasticsearch | `R0-WS1-007` |
 
-Only `network` exists. The rest are named here so the shape is visible before it is built,
+Only `network` and `gke` exist. The rest are named here so the shape is visible before it is built,
 and so a story that invents a sixth module has to explain why.
 
 ## The rules
@@ -93,3 +93,16 @@ make check      # fmt and validate every module — no credentials, no cloud pro
 
 Validation needs no credentials because of the first rule above. That is not a coincidence:
 a module that could not be validated offline would be one that reads the world.
+
+## The `gke` module uses `google-beta`
+
+Deliberately, and only this module. GKE Sandbox — gVisor — appears in `gcloud` and in the
+API, and `sandbox_config` exists in no version of the `google` provider's schema. Without
+it a gVisor node pool cannot be expressed in Terraform at all.
+
+That matters because gVisor is not a nicety here: HLD §10 rests the sandbox design on it,
+and Spike A's acceptance is that the prototype's containment suite passes against it. The
+alternative was a node pool created by `gcloud` outside Terraform — the one piece of
+security-critical infrastructure that nothing manages, plans or drifts against.
+
+If `sandbox_config` ever lands in the `google` provider, switching back is one line.
