@@ -26,6 +26,17 @@ resource "google_container_cluster" "cluster" {
   remove_default_node_pool = true
   initial_node_count       = 1
 
+  # The throwaway default pool still needs an identity, and left unset it takes the default
+  # compute service account — which holds Editor on the project. Terraform then needs
+  # actAs on *that* account to create the cluster, which would hand CI a path to
+  # impersonate an Editor. Naming our own account here avoids granting it at all.
+  #
+  # The pool is deleted seconds later; the permission it would have required is permanent.
+  node_config {
+    service_account = var.node_service_account
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
+  }
+
   # Deletion protection off in every environment, including prod. The protection that
   # matters is a reviewed plan and a PR; a flag that makes `terraform destroy` fail is
   # worked around by the person who most wanted to destroy it.
@@ -111,9 +122,9 @@ resource "google_container_cluster" "cluster" {
   }
 
   lifecycle {
-    # The node count on the removed default pool drifts; ignoring it stops every plan
-    # proposing a change nobody made.
-    ignore_changes = [initial_node_count]
+    # Both belong to the default pool, which is removed at creation. Without this every
+    # plan proposes a change to a pool that no longer exists.
+    ignore_changes = [initial_node_count, node_config]
   }
 }
 
