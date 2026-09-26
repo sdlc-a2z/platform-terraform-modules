@@ -7,9 +7,85 @@
 
 # --------------------------------------------------------------------- sandbox egress
 #
-# The sandbox runs model-authored code. Three denies at the lowest priorities, before any
-# allow in this file or any default, because each closes a path that turns "untrusted code
-# ran" into "credentials left the building".
+# These rules apply to the *node*, because a VPC firewall filters nodes — a pod shares its
+# node's network stack and tags. The pod's own egress is a NetworkPolicy, and both layers
+# are required (ADR-0008).
+#
+# The first version of this file denied everything from the `sandbox` tag, which is
+# correct for a pod and fatal for a node: the node could not reach the GKE control plane
+# to register, was recreated several times, and the pool gave up. The rules worked; the
+# design did not.
+#
+# So: a node gets exactly what it needs to join and nothing else. Priorities stay low so
+# no later allow can undo them.
+
+resource "google_compute_firewall" "sandbox_allow_control_plane" {
+  name      = "${local.prefix}-sandbox-allow-control-plane"
+  project   = var.project_id
+  network   = google_compute_network.vpc.name
+  direction = "EGRESS"
+  priority  = 90
+
+  # Without this the kubelet cannot register and the node is destroyed and recreated
+  # forever. It is the narrowest of the three allows — one /28, one port.
+  destination_ranges = [var.master_cidr]
+  target_tags        = ["sandbox"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443", "10250"]
+  }
+
+  description = "The GKE control plane. A node that cannot reach it never joins."
+}
+
+resource "google_compute_firewall" "sandbox_allow_google_apis" {
+  name      = "${local.prefix}-sandbox-allow-google-apis"
+  project   = var.project_id
+  network   = google_compute_network.vpc.name
+  direction = "EGRESS"
+  priority  = 91
+
+  # private.googleapis.com only — not the whole internet, and not the public API IPs.
+  # Image pulls, logging and monitoring go here. A pod cannot use it: the NetworkPolicy
+  # denies pod egress, and Workload Identity means a pod's token is not the node's.
+  destination_ranges = ["199.36.153.8/30"]
+  target_tags        = ["sandbox"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443"]
+  }
+
+  description = "Private Google Access, for image pulls and telemetry. Node only; pods are denied by NetworkPolicy."
+}
+
+resource "google_compute_firewall" "sandbox_allow_metadata_dns_ntp" {
+  name      = "${local.prefix}-sandbox-allow-metadata-dns-ntp"
+  project   = var.project_id
+  network   = google_compute_network.vpc.name
+  direction = "EGRESS"
+  priority  = 92
+
+  # DNS and NTP only. Deliberately NOT port 80, which is where the metadata server hands
+  # out credentials — that stays denied at priority 100 below.
+  #
+  # A node needs name resolution and time; without time, TLS to the control plane fails in
+  # a way that looks like anything but a clock.
+  destination_ranges = [local.metadata_cidr]
+  target_tags        = ["sandbox"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["53"]
+  }
+  allow {
+    protocol = "udp"
+    ports    = ["53", "123"]
+  }
+
+  description = "DNS and NTP from the metadata server. Port 80 — the credentials endpoint — stays denied."
+}
 
 resource "google_compute_firewall" "sandbox_deny_metadata" {
   name      = "${local.prefix}-sandbox-deny-metadata"
@@ -18,16 +94,15 @@ resource "google_compute_firewall" "sandbox_deny_metadata" {
   direction = "EGRESS"
   priority  = 100
 
-  # The metadata server hands the node's service-account token to anything that asks, over
-  # plain HTTP, with no authentication beyond being on the box. For a sandbox that is a
-  # full credential compromise in one curl. Workload Identity narrows what the token can
-  # do; it does not stop the sandbox getting one.
+  # The credentials endpoint. It hands the node's service-account token to anything that
+  # asks, over plain HTTP, with no authentication beyond being on the box. Denied at a
+  # higher number than the DNS allow above, so 53 and 123 survive and 80 does not.
   destination_ranges = [local.metadata_cidr]
   target_tags        = ["sandbox"]
 
-  deny { protocol = "all" }
+  deny { protocol = "tcp" }
 
-  description = "Denies 169.254.169.254. Spike A's acceptance criterion is that a sandbox pod cannot reach it."
+  description = "Denies the metadata credentials endpoint. Spike A's acceptance criterion is that a sandbox pod cannot reach 169.254.169.254."
 }
 
 resource "google_compute_firewall" "sandbox_deny_internal" {
@@ -37,21 +112,22 @@ resource "google_compute_firewall" "sandbox_deny_internal" {
   direction = "EGRESS"
   priority  = 110
 
-  # Everything else in the VPC. A sandbox that can reach the services zone can call an
-  # internal API with no token and get whatever that API does not check — and the data
-  # zone holds every tenant's data behind nothing but RLS.
+  # Every other zone. A sandbox reaching the services zone can call an internal API with no
+  # token; the data zone holds every tenant's data behind nothing but RLS.
+  #
+  # The pod CIDR is excluded: kube-dns and the node's own pods live there, and a node that
+  # cannot resolve in-cluster names cannot run anything. Pod-to-pod egress is denied by the
+  # NetworkPolicy instead, which is the layer that can tell a sandbox pod from kube-dns.
   destination_ranges = [
     var.subnets.edge,
     var.subnets.services,
     var.subnets.data,
-    var.pods_cidr,
-    var.services_cidr,
   ]
   target_tags = ["sandbox"]
 
   deny { protocol = "all" }
 
-  description = "A sandbox may not reach any other zone. Its only permitted destination is the egress proxy."
+  description = "No other zone. Pod-to-pod is handled by NetworkPolicy, which can distinguish a sandbox pod from kube-dns."
 }
 
 resource "google_compute_firewall" "sandbox_deny_internet" {
@@ -65,11 +141,10 @@ resource "google_compute_firewall" "sandbox_deny_internet" {
 
   deny { protocol = "all" }
 
-  description = "No internet from a sandbox. Package installs go through the proxy, which logs and allow-lists them."
+  description = "No internet. Package installs go through the proxy, which logs and allow-lists them."
 }
 
-# The one hole, and it is only a hole once something fills egress_proxy_ip. Priority 90 so
-# it precedes the denies above — the only rule in this file that does.
+# The one hole for pods, and it only exists once something fills egress_proxy_ip.
 resource "google_compute_firewall" "sandbox_allow_proxy" {
   count = var.egress_proxy_ip == "" ? 0 : 1
 
@@ -77,7 +152,7 @@ resource "google_compute_firewall" "sandbox_allow_proxy" {
   project            = var.project_id
   network            = google_compute_network.vpc.name
   direction          = "EGRESS"
-  priority           = 90
+  priority           = 95
   destination_ranges = ["${var.egress_proxy_ip}/32"]
   target_tags        = ["sandbox"]
 
@@ -86,7 +161,7 @@ resource "google_compute_firewall" "sandbox_allow_proxy" {
     ports    = ["3128"]
   }
 
-  description = "The single permitted sandbox destination. Absent until sandbox-controller exists, and while absent a sandbox has no egress at all."
+  description = "The single permitted sandbox destination. Absent until sandbox-controller exists."
 }
 
 # --------------------------------------------------------------------- zone boundaries

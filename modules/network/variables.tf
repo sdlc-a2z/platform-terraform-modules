@@ -54,3 +54,12 @@ variable "egress_proxy_ip" {
   type        = string
   default     = ""
 }
+
+variable "master_cidr" {
+  description = <<-EOT
+    The GKE control plane's /28. A sandbox node must reach it on 443 or the kubelet never
+    registers — which is how the first version of this module produced a node pool that
+    could not scale.
+  EOT
+  type        = string
+}
