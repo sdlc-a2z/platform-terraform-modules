@@ -16,9 +16,22 @@ locals {
   # and there is no perimeter yet. ADR-0009 revisits it with one.
   private_api_vip = ["199.36.153.8", "199.36.153.9", "199.36.153.10", "199.36.153.11"]
 
+  # Three domains, and the third is the one that actually stopped the cluster.
+  #
+  # `googleapis.com` covers the APIs, including storage, which is what a registry's layers
+  # are served from. `pkg.dev` is Artifact Registry, where our own images live.
+  #
+  # `gcr.io` is where GKE's *own* system images come from — the `pause` container, anetd,
+  # netd, the metadata server, fluentbit. Without it a node joins, reports NotReady, and
+  # every system pod sits in `Init:0/n` with `dial tcp 192.178.230.82:443: i/o timeout`:
+  # a public address, because the name resolved publicly, denied by `deny-internet`. The
+  # error names the image and says nothing about DNS. Adding two zones and missing this
+  # one buys a node that is worse than the one that could not scale, because it looks
+  # like it nearly worked.
   api_zones = {
     googleapis = { domain = "googleapis.com.", description = "Google APIs over Private Google Access" }
     pkgdev     = { domain = "pkg.dev.", description = "Artifact Registry over Private Google Access" }
+    gcrio      = { domain = "gcr.io.", description = "GKE system images over Private Google Access" }
   }
 }
 
