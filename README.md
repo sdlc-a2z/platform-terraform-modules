@@ -60,12 +60,13 @@ if it is true of one deployment, it belongs in that deployment's repository.
 |---|---|---|
 | [`network`](modules/network) | VPC, four zones, firewall, NAT | `R0-WS1-001` |
 | [`gke`](modules/gke) | cluster, node pools, gVisor, Workload Identity | `R0-WS1-002` |
+| [`artifact-registry`](modules/artifact-registry) | Docker registries, immutable tags, per-repository IAM | `R0-WS3-003` |
 | `data` | Cloud SQL, Memorystore, Kafka, OpenSearch | `R0-WS1-004` |
 | `observability` | OTel Collector, Prometheus, Grafana | `R0-WS1-005` |
 | `temporal` | self-hosted cluster, own Postgres, Elasticsearch | `R0-WS1-007` |
 
-Only `network` and `gke` exist. The rest are named here so the shape is visible before it is built,
-and so a story that invents a sixth module has to explain why.
+Only `network`, `gke` and `artifact-registry` exist. The rest are named here so the shape is
+visible before it is built, and so a story that invents a seventh module has to explain why.
 
 ## The rules
 
@@ -78,8 +79,19 @@ depend on whichever environment happens to be up.
 cannot be overridden and pins every consumer to one project and region.
 
 **Every variable gets a description, and every dangerous default gets a comment saying
-what it prevents.** The network module's `private_ip_google_access = false` on the sandbox
-subnet looks like an oversight and is the opposite; it says so in place.
+what it prevents.** The sandbox subnet's `private_ip_google_access` used to be the example
+here — `false`, with a comment explaining that it looked like an oversight and was the
+opposite.
+
+It is now `true`, and the comment that defended it was wrong (ADR-0009). It reasoned about
+what a *pod* could reach and set a flag that governs the *node*, which is the exact
+confusion ADR-0008 was written to correct. Off, the node could pull no image from anywhere
+and the firewall's `sandbox-allow-google-apis` rule permitted a destination with no route
+to it — a control that looked like it was doing something.
+
+The rule survives the example. A comment saying what a default prevents is worth having;
+it is also the thing nobody re-reads, so it outlives the reasoning behind it. **Prefer a
+check to a comment** where one is possible.
 
 **Tag every change.** `terraform fmt`, `terraform validate`, then a tag. Consumers pin, so
 an untagged change reaches nobody — which is correct, and also means forgetting to tag
