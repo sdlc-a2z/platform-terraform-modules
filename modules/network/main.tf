@@ -83,10 +83,21 @@ resource "google_compute_subnetwork" "sandbox" {
   network       = google_compute_network.vpc.id
   ip_cidr_range = var.subnets.sandbox
 
-  # Explicitly false. With it on, a pod here could reach Google APIs — including Secret
-  # Manager and Cloud Storage — without leaving the VPC, which is exactly the exfiltration
-  # path this zone exists to close.
-  private_ip_google_access = false
+  # On, and this reverses what was written here before. ADR-0009.
+  #
+  # The old comment said a pod here could otherwise reach Secret Manager and Cloud Storage
+  # without leaving the VPC. That reasons about a *pod* and sets a control on a *subnet*,
+  # which is the confusion ADR-0008 exists to correct: this flag governs the node.
+  #
+  # Off, the node could pull no image from anywhere — no NAT, no Google, no internet — so
+  # the sandbox pool could not run a container at all, and the firewall's
+  # `sandbox-allow-google-apis` rule permitted a destination with no route to it.
+  #
+  # On, the node reaches 199.36.153.8/30 and nothing else: `restricted.googleapis.com`,
+  # which is the only destination the egress firewall permits besides the control plane
+  # and DNS. Not the internet, not even all of Google. The pod is still denied every
+  # egress by NetworkPolicy, and GKE_METADATA stops it borrowing the node's identity.
+  private_ip_google_access = true
 
   # Full sampling: this is where untrusted, model-authored code runs, and the traffic
   # volume is low enough that the cost is worth the record.
