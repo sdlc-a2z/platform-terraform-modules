@@ -105,6 +105,38 @@ resource "google_compute_firewall" "sandbox_deny_metadata" {
   description = "Denies the metadata credentials endpoint. Spike A's acceptance criterion is that a sandbox pod cannot reach 169.254.169.254."
 }
 
+# The cluster's own pod network, and it has to be an *allow*.
+#
+# `sandbox_deny_internal` below says the pod CIDR "is excluded", and it is — from that
+# rule. `sandbox_deny_internet` then denies 0.0.0.0/0 at priority 120, which contains the
+# pod CIDR, so excluding it from one deny and not permitting it anywhere left it denied.
+# An exclusion is not a permission. That is the third control in this network written as
+# though omission were allowance.
+#
+# Measured, not inferred: a sandbox pod could not open a TCP connection to the egress
+# proxy's pod IP on another node, with every NetworkPolicy in the namespace removed. DNS
+# worked because `node-local-dns` runs on the same node and never leaves it.
+#
+# This permits the sandbox *node* to reach cluster pods. It does not permit a sandbox
+# *pod* to: the NetworkPolicy allows the proxy and node-local DNS and nothing else, which
+# is ADR-0008's division of labour. Verified by removing it — metadata and the Google VIP
+# become reachable and the suite fails.
+resource "google_compute_firewall" "sandbox_allow_cluster_pods" {
+  name      = "${local.prefix}-sandbox-allow-cluster-pods"
+  project   = var.project_id
+  network   = google_compute_network.vpc.name
+  direction = "EGRESS"
+  priority  = 93
+
+  destination_ranges = [var.pods_cidr]
+  target_tags        = ["sandbox"]
+
+  allow { protocol = "tcp" }
+  allow { protocol = "udp" }
+
+  description = "Cluster pod network. Required for a sandbox pod to reach the egress proxy and node-local DNS; which pods it may actually reach is the NetworkPolicy's job."
+}
+
 resource "google_compute_firewall" "sandbox_deny_internal" {
   name      = "${local.prefix}-sandbox-deny-internal"
   project   = var.project_id
@@ -115,9 +147,11 @@ resource "google_compute_firewall" "sandbox_deny_internal" {
   # Every other zone. A sandbox reaching the services zone can call an internal API with no
   # token; the data zone holds every tenant's data behind nothing but RLS.
   #
-  # The pod CIDR is excluded: kube-dns and the node's own pods live there, and a node that
-  # cannot resolve in-cluster names cannot run anything. Pod-to-pod egress is denied by the
-  # NetworkPolicy instead, which is the layer that can tell a sandbox pod from kube-dns.
+  # The pod CIDR is not listed here, and on its own that achieved nothing: `deny_internet`
+  # at 120 denies 0.0.0.0/0, which contains it. It is permitted by
+  # `sandbox_allow_cluster_pods` at priority 93 — an exclusion from one deny is not a
+  # permission. Which pods a sandbox may reach is the NetworkPolicy's job, since that is
+  # the layer that can tell a sandbox pod from kube-dns.
   destination_ranges = [
     var.subnets.edge,
     var.subnets.services,
