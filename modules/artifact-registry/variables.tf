@@ -31,6 +31,7 @@ variable "repositories" {
 
   type = map(object({
     description        = string
+    format             = optional(string, "DOCKER")
     readers            = optional(list(string), [])
     writers            = optional(list(string), [])
     keep_untagged_days = optional(number, null)
@@ -39,6 +40,17 @@ variable "repositories" {
   validation {
     condition     = alltrue([for k in keys(var.repositories) : can(regex("^[a-z][a-z0-9-]{1,40}$", k))])
     error_message = "Repository keys must be lowercase alphanumeric with hyphens, 2-41 characters."
+  }
+
+  validation {
+    # The formats this platform has an actual use for, not GAR's full list (APT, YUM,
+    # KFP, Maven also exist). Narrower on purpose: a typo like "Python" fails here instead
+    # of a confusing 400 from the API, and a format nothing here consumes is one nobody
+    # has thought through the cleanup-policy or IAM implications of.
+    condition = alltrue([
+      for cfg in values(var.repositories) : contains(["DOCKER", "PYTHON", "NPM"], cfg.format)
+    ])
+    error_message = "format must be one of DOCKER, PYTHON, NPM."
   }
 
   validation {

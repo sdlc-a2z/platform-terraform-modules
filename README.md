@@ -60,7 +60,7 @@ if it is true of one deployment, it belongs in that deployment's repository.
 |---|---|---|
 | [`network`](modules/network) | VPC, four zones, firewall, NAT | `R0-WS1-001` |
 | [`gke`](modules/gke) | cluster, node pools, gVisor, Workload Identity | `R0-WS1-002` |
-| [`artifact-registry`](modules/artifact-registry) | Docker registries, immutable tags, per-repository IAM | `R0-WS3-003` |
+| [`artifact-registry`](modules/artifact-registry) | Docker, Python and npm registries, per-repository IAM | `R0-WS3-003`, `R0-WS2-008` |
 | `data` | Cloud SQL, Memorystore, Kafka, OpenSearch | `R0-WS1-004` |
 | `observability` | OTel Collector, Prometheus, Grafana | `R0-WS1-005` |
 | `temporal` | self-hosted cluster, own Postgres, Elasticsearch | `R0-WS1-007` |
