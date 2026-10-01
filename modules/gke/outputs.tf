@@ -12,6 +12,12 @@ output "endpoint" {
   sensitive = true
 }
 
+output "ca_certificate" {
+  description = "Base64-encoded cluster CA, for a kubernetes/helm provider talking directly to the API server (R0-WS1-003: Argo CD, installed from outside Argo CD itself)."
+  value       = google_container_cluster.cluster.master_auth[0].cluster_ca_certificate
+  sensitive   = true
+}
+
 output "workload_pool" {
   description = "For binding Kubernetes service accounts to Google ones, with no key."
   value       = google_container_cluster.cluster.workload_identity_config[0].workload_pool
