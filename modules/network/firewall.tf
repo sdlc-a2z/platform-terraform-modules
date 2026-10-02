@@ -213,7 +213,7 @@ resource "google_compute_firewall" "sandbox_allow_proxy" {
 # could not exist... read as a working control and was decoration"). Kept rather than
 # removed: harmless, costs nothing, and becomes real the day anything GCE-backed is
 # ever tagged `data`. The rule that actually constrains Cloud SQL traffic is
-# `services_allow_to_psa_data`, below.
+# `services_allow_to_data_zone`, below.
 resource "google_compute_firewall" "data_deny_egress" {
   name               = "${local.prefix}-data-deny-egress"
   project            = var.project_id
@@ -245,26 +245,40 @@ resource "google_compute_firewall" "data_allow_from_services" {
   description = "Only the services zone reaches the data zone, and only on the ports it actually uses. Currently inert — see the comment above data_deny_egress."
 }
 
-# The rule that actually constrains Cloud SQL traffic (R0-WS1-004): EGRESS, sourced by the
-# `services` tag GKE really does put on its nodes (gke/main.tf), rather than an INGRESS
-# rule keyed to a destination tag Cloud SQL can never carry. This is the acceptance
-# criterion ("each service database is reachable only from the services zone") actually
-# enforced, not just described.
-resource "google_compute_firewall" "services_allow_to_psa_data" {
-  name               = "${local.prefix}-services-allow-to-psa-data"
-  project            = var.project_id
-  network            = google_compute_network.vpc.name
-  direction          = "EGRESS"
-  priority           = 210
-  destination_ranges = [var.psa_range]
-  target_tags        = ["services"]
+# The rule that actually constrains the managed data layer (R0-WS1-004): EGRESS, sourced
+# by the `services` tag GKE really does put on its nodes (gke/main.tf), rather than an
+# INGRESS rule keyed to a destination tag these services can never carry. This is the
+# acceptance criterion ("each service database is reachable only from the services zone")
+# actually enforced, not just described.
+#
+# Two destination ranges, not one, because Cloud SQL/Memorystore and Managed Kafka get
+# their address from different places: psa_range (classic peering) for the first two,
+# subnets.data (direct VPC attachment, ADR-0006) for Kafka. Renamed from
+# services_allow_to_psa_data via `moved` so the live rule carries over rather than being
+# destroyed and recreated — its name on GCP itself is unchanged.
+moved {
+  from = google_compute_firewall.services_allow_to_psa_data
+  to   = google_compute_firewall.services_allow_to_data_zone
+}
+
+resource "google_compute_firewall" "services_allow_to_data_zone" {
+  name      = "${local.prefix}-services-allow-to-psa-data"
+  project   = var.project_id
+  network   = google_compute_network.vpc.name
+  direction = "EGRESS"
+  priority  = 210
+  destination_ranges = [
+    var.psa_range,
+    var.subnets.data,
+  ]
+  target_tags = ["services"]
 
   allow {
     protocol = "tcp"
-    ports    = ["5432", "6379"] # Postgres, Redis. Kafka/OpenSearch join when those land.
+    ports    = ["5432", "6379", "9092"] # Postgres, Redis, Kafka. OpenSearch joins when it lands.
   }
 
-  description = "Only the services zone reaches Cloud SQL and Memorystore, and only on the ports they use."
+  description = "Only the services zone reaches the managed data layer, and only on the ports it uses."
 }
 
 resource "google_compute_firewall" "services_allow_from_edge" {

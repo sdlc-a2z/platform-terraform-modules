@@ -74,11 +74,16 @@ resource "google_compute_subnetwork" "data" {
   # Not what makes Cloud SQL or Memorystore privately reachable — the comment here
   # previously claimed that, and it was wrong (found implementing R0-WS1-004, not in
   # review). Those services get their private IP from the separate Private Service
-  # Access range below, never from this or any other subnet; nothing in this project
-  # currently places a GCE-backed, taggable resource in this subnet at all. Kept because
-  # removing it is a bigger question than this story (R0-WS1-011 already exists for the
-  # equivalent question about the sandbox subnet) — `private_ip_google_access` stays on
-  # defensively, in case something tagged `data` ever does live here.
+  # Access range below, never from this or any other subnet.
+  #
+  # This subnet does have a real tenant now, just not either of the ones first claimed:
+  # Managed Kafka attaches directly to a VPC subnet (`gcp_config.access_config` — ADR-0006,
+  # it sits inside the VPC rather than behind classic peering), and this is that subnet.
+  # It is still not a GCE instance and still carries no `data` tag, so the tag-based
+  # firewall rules below remain inert for it too — enforcement is
+  # `services_allow_to_data_zone`'s source-tagged egress rule, the same shape PSA's
+  # services use. `private_ip_google_access` stays on regardless, in case something
+  # tagged `data` ever lives here too.
   private_ip_google_access = true
 }
 
