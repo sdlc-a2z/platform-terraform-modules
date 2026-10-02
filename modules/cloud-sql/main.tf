@@ -1,15 +1,28 @@
 # One Cloud SQL Postgres 16 instance, REGIONAL (HA) availability, one database and one
 # <name>_owner / <name>_app role pair per entry in `var.databases` (LLD §1.4, ADR-0011).
 #
-# What this module does NOT do, and why: `google_sql_database`/`google_sql_user` are
-# Cloud SQL Admin API calls, not SQL. They create a bare database and two login roles, but
-# the Admin API — not any Postgres role — ends up owning each database, so `<name>_owner`
-# cannot actually create a table in "its own" database yet. That one GRANT per database
-# (`GRANT CREATE ON SCHEMA public TO "<name>_owner"`) needs a live SQL connection to a
-# private IP nothing outside the VPC can reach — CI included — so it is a one-time,
-# operator-run step against the cluster, not a Terraform resource. See this repository's
-# README / the story's spec for the exact command. `<name>_app` needs no equivalent grant:
-# Postgres 16 does not grant CREATE on the public schema to a non-owner role by default.
+# What this module does NOT do, and why: `google_sql_database`/`google_sql_user` are Cloud
+# SQL Admin API calls, not SQL, and every `google_sql_user` this way comes back a member of
+# `cloudsqlsuperuser` with CREATEDB/CREATEROLE set directly on the role — found live, not
+# documented anywhere obvious: a freshly created `<name>_app` could run CREATE TABLE
+# despite no explicit grant, because `cloudsqlsuperuser` itself holds CREATE on the public
+# schema and role membership inherits it. Two live-SQL steps are needed per database
+# before the role split actually means anything, and neither can be a Terraform resource —
+# they need a connection to a private IP nothing outside the VPC can reach, CI included —
+# so both are one-time, operator-run steps against the cluster. See this repository's
+# README / the story's spec for the exact commands:
+#
+#   REVOKE cloudsqlsuperuser FROM "<name>_app";
+#   REVOKE cloudsqlsuperuser FROM "<name>_owner";
+#   ALTER ROLE "<name>_app" NOCREATEDB NOCREATEROLE;
+#   ALTER ROLE "<name>_owner" NOCREATEDB NOCREATEROLE;
+#   GRANT CREATE ON SCHEMA public TO "<name>_owner";   -- only after the above; see below
+#
+# That GRANT is also load-bearing on its own, for an unrelated reason: the Admin API, not
+# any Postgres role, ends up owning each database, so `<name>_owner` cannot create a table
+# in "its own" database without it. `<name>_app` needs no equivalent grant — once it is no
+# longer a `cloudsqlsuperuser` member, Postgres 16's real default (no CREATE on the public
+# schema for a non-owner role) applies as expected.
 
 resource "google_sql_database_instance" "main" {
   name                = "${var.environment}-aisdlc"
