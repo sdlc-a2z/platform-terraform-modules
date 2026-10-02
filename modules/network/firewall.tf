@@ -261,10 +261,10 @@ resource "google_compute_firewall" "services_allow_to_psa_data" {
 
   allow {
     protocol = "tcp"
-    ports    = ["5432"] # Postgres only for now — Redis/Kafka join when those land.
+    ports    = ["5432", "6379"] # Postgres, Redis. Kafka/OpenSearch join when those land.
   }
 
-  description = "Only the services zone reaches Cloud SQL, and only on 5432."
+  description = "Only the services zone reaches Cloud SQL and Memorystore, and only on the ports they use."
 }
 
 resource "google_compute_firewall" "services_allow_from_edge" {
