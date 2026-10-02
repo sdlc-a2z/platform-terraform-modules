@@ -63,3 +63,14 @@ variable "master_cidr" {
   EOT
   type        = string
 }
+
+# R0-WS1-004: Cloud SQL and classic-peered Memorystore do not get their private IP from
+# any subnet above, including `data` — that subnet's own comment claimed otherwise, and
+# was wrong. GCP hands these services an address out of a range reserved separately via
+# Private Service Access (PSA), peered to the VPC through `servicenetworking.googleapis.com`.
+# No default, same reasoning as `subnets`: an address plan is a fact about one deployment.
+# Must not overlap `subnets`, `pods_cidr` or `services_cidr`.
+variable "psa_range" {
+  description = "CIDR reserved for Private Service Access peering (Cloud SQL, Memorystore)."
+  type        = string
+}

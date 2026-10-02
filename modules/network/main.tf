@@ -71,9 +71,35 @@ resource "google_compute_subnetwork" "data" {
   network       = google_compute_network.vpc.id
   ip_cidr_range = var.subnets.data
 
-  # Private Google Access so Cloud SQL and Memorystore are reachable without a public
-  # address anywhere in this zone.
+  # Not what makes Cloud SQL or Memorystore privately reachable — the comment here
+  # previously claimed that, and it was wrong (found implementing R0-WS1-004, not in
+  # review). Those services get their private IP from the separate Private Service
+  # Access range below, never from this or any other subnet; nothing in this project
+  # currently places a GCE-backed, taggable resource in this subnet at all. Kept because
+  # removing it is a bigger question than this story (R0-WS1-011 already exists for the
+  # equivalent question about the sandbox subnet) — `private_ip_google_access` stays on
+  # defensively, in case something tagged `data` ever does live here.
   private_ip_google_access = true
+}
+
+# R0-WS1-004: the actual mechanism behind Cloud SQL's and Memorystore's private IP.
+# Reserved purely as an address range — nothing is "in" it the way a subnet holds
+# instances — then peered to Google's own tenant network, which is where these services'
+# private endpoints actually live.
+resource "google_compute_global_address" "private_service_access" {
+  name          = "${local.prefix}-psa"
+  project       = var.project_id
+  purpose       = "VPC_PEERING"
+  address_type  = "INTERNAL"
+  address       = cidrhost(var.psa_range, 0)
+  prefix_length = tonumber(split("/", var.psa_range)[1])
+  network       = google_compute_network.vpc.id
+}
+
+resource "google_service_networking_connection" "private_service_access" {
+  network                 = google_compute_network.vpc.id
+  service                 = "servicenetworking.googleapis.com"
+  reserved_peering_ranges = [google_compute_global_address.private_service_access.name]
 }
 
 resource "google_compute_subnetwork" "sandbox" {

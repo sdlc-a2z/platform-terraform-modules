@@ -36,3 +36,12 @@ output "sandbox_has_egress" {
   EOT
   value       = var.egress_proxy_ip != ""
 }
+
+output "private_service_access_connection" {
+  description = <<-EOT
+    R0-WS1-004: a Cloud SQL or Memorystore instance must depend on this (not just on
+    network_id) — creating one before the peering connection exists fails, since the
+    service has nowhere to put its private IP yet.
+  EOT
+  value       = google_service_networking_connection.private_service_access.id
+}

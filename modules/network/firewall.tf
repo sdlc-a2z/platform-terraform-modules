@@ -156,6 +156,10 @@ resource "google_compute_firewall" "sandbox_deny_internal" {
     var.subnets.edge,
     var.subnets.services,
     var.subnets.data,
+    # R0-WS1-004: Cloud SQL's and Memorystore's real private IP comes from here, not
+    # `var.subnets.data` — without this, a sandbox node could reach a tenant database
+    # directly, and `var.subnets.data` alone was silently not covering it.
+    var.psa_range,
   ]
   target_tags = ["sandbox"]
 
@@ -200,6 +204,16 @@ resource "google_compute_firewall" "sandbox_allow_proxy" {
 
 # --------------------------------------------------------------------- zone boundaries
 
+# These two `target_tags = ["data"]` rules protect only a GCE-backed resource tagged
+# `data` in this project — and nothing has ever been. Cloud SQL and Memorystore are not
+# GCE instances in this project at all (R0-WS1-004: their private IP comes from
+# `psa_range` below, not this subnet or its tag), and self-hosted OpenSearch runs as a
+# pod in the services zone (ADR-0011), not here either. Found live, not in review — the
+# same failure mode ADR-0009 already caught once ("a firewall rule for traffic that
+# could not exist... read as a working control and was decoration"). Kept rather than
+# removed: harmless, costs nothing, and becomes real the day anything GCE-backed is
+# ever tagged `data`. The rule that actually constrains Cloud SQL traffic is
+# `services_allow_to_psa_data`, below.
 resource "google_compute_firewall" "data_deny_egress" {
   name               = "${local.prefix}-data-deny-egress"
   project            = var.project_id
@@ -211,7 +225,7 @@ resource "google_compute_firewall" "data_deny_egress" {
 
   deny { protocol = "all" }
 
-  description = "HLD §10.2: the data zone has no egress. A database that can call out is a database that can be made to exfiltrate."
+  description = "HLD §10.2: the data zone has no egress. A database that can call out is a database that can be made to exfiltrate. Currently inert — see the comment above this rule."
 }
 
 resource "google_compute_firewall" "data_allow_from_services" {
@@ -228,7 +242,29 @@ resource "google_compute_firewall" "data_allow_from_services" {
     ports    = ["5432", "6379", "9092", "9200"] # Postgres, Redis, Kafka, OpenSearch
   }
 
-  description = "Only the services zone reaches the data zone, and only on the ports it actually uses."
+  description = "Only the services zone reaches the data zone, and only on the ports it actually uses. Currently inert — see the comment above data_deny_egress."
+}
+
+# The rule that actually constrains Cloud SQL traffic (R0-WS1-004): EGRESS, sourced by the
+# `services` tag GKE really does put on its nodes (gke/main.tf), rather than an INGRESS
+# rule keyed to a destination tag Cloud SQL can never carry. This is the acceptance
+# criterion ("each service database is reachable only from the services zone") actually
+# enforced, not just described.
+resource "google_compute_firewall" "services_allow_to_psa_data" {
+  name               = "${local.prefix}-services-allow-to-psa-data"
+  project            = var.project_id
+  network            = google_compute_network.vpc.name
+  direction          = "EGRESS"
+  priority           = 210
+  destination_ranges = [var.psa_range]
+  target_tags        = ["services"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["5432"] # Postgres only for now — Redis/Kafka join when those land.
+  }
+
+  description = "Only the services zone reaches Cloud SQL, and only on 5432."
 }
 
 resource "google_compute_firewall" "services_allow_from_edge" {
