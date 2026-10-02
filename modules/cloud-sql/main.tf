@@ -21,6 +21,15 @@ resource "google_sql_database_instance" "main" {
   settings {
     tier = var.tier
 
+    # Without this, the provider defaults to ENTERPRISE_PLUS — found live
+    # ("Invalid Tier (db-custom-2-7680) for (ENTERPRISE_PLUS) Edition. Use a predefined
+    # Tier like db-perf-optimized-N-* instead"), not documented anywhere as a default
+    # worth knowing. ENTERPRISE_PLUS is Google's newer, pricier edition (data cache,
+    # near-zero-downtime updates); ENTERPRISE is the classic db-custom-N-M tier shape and
+    # matches ADR-0007's "minimally sized dev" — this platform has no feature that needs
+    # what the newer edition adds.
+    edition = "ENTERPRISE"
+
     # REGIONAL, not ZONAL (ADR-0011): a synchronous standby in a second zone, automatic
     # failover. Costs roughly double a single-zone instance — accepted because the
     # per-service schema and role split is a permanent decision worth getting right once
