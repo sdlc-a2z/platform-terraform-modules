@@ -12,7 +12,6 @@ output "subnets" {
     edge     = google_compute_subnetwork.edge.id
     services = google_compute_subnetwork.services.id
     data     = google_compute_subnetwork.data.id
-    sandbox  = google_compute_subnetwork.sandbox.id
   }
 }
 

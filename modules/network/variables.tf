@@ -23,15 +23,11 @@ variable "environment" {
 # is private. Requiring them also stops a second environment silently inheriting the
 # first's ranges and colliding on a future peering.
 variable "subnets" {
-  description = <<-EOT
-    Zone CIDRs (HLD §10.2). The sandbox range is deliberately separate: nothing in it may
-    reach anything except the egress proxy.
-  EOT
+  description = "Zone CIDRs (HLD §10.2)."
   type = object({
     edge     = string
     services = string
     data     = string
-    sandbox  = string
   })
 }
 

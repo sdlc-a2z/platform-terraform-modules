@@ -55,8 +55,12 @@ resource "google_container_cluster" "cluster" {
   }
 
   private_cluster_config {
-    # Nodes have no public addresses. They reach the internet through Cloud NAT, which is
-    # scoped to exclude the sandbox subnet — so a sandbox node has no route out at all.
+    # Nodes have no public addresses. They'd otherwise reach the internet through Cloud
+    # NAT (the `services` subnet, which every node pool in this cluster — sandbox
+    # included, there is no separate sandbox subnet, R0-WS1-011 — shares) — except a
+    # sandbox node never gets that far: `platform-terraform-modules/modules/network`'s
+    # `target_tags = ["sandbox"]` deny-internet firewall rule blocks it before NAT, which
+    # is the actual control, not subnet membership.
     enable_private_nodes = true
     # The control plane keeps a public endpoint, gated by authorized_networks below.
     # Turning it off entirely requires a bastion or VPN to run kubectl, which R0 does not

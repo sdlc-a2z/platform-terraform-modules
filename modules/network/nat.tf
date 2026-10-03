@@ -1,9 +1,14 @@
 # Egress to the internet for the services zone, and nothing else.
 #
-# Services must reach LLM providers, GitHub and tool APIs. The sandbox must not, which is
-# why NAT is attached to named subnets rather than the whole network — the default,
-# ALL_SUBNETWORKS_ALL_IP_RANGES, would hand the sandbox a route to the internet and quietly
-# undo the firewall rules next door.
+# "Named subnets, not the whole network" doesn't do the job alone (R0-WS1-011): every
+# node pool, sandbox included, has its primary NIC in `services` — there is no separate
+# subnet for the sandbox pool to be excluded from. `ALL_SUBNETWORKS_ALL_IP_RANGES` would
+# still be worse (it would also cover any future subnet added here without a review), but
+# what actually stops a sandbox node from using this NAT gateway is
+# `firewall.tf`'s `target_tags = ["sandbox"]` deny-internet rule at priority 120, evaluated
+# before a packet ever reaches NAT. If that firewall rule were removed, a sandbox node
+# would reach the real internet through this same gateway — the subnet list below has
+# never been the control.
 
 resource "google_compute_router" "router" {
   name    = "${local.prefix}-router"
@@ -32,7 +37,10 @@ resource "google_compute_router_nat" "nat" {
   nat_ip_allocate_option = "MANUAL_ONLY"
   nat_ips                = [google_compute_address.nat.self_link]
 
-  # The load-bearing line. LIST_OF_SUBNETWORKS, and the sandbox subnet is not in the list.
+  # LIST_OF_SUBNETWORKS, not ALL_SUBNETWORKS_ALL_IP_RANGES — so a future subnet added to
+  # this VPC gets no NAT route by default and has to be added here deliberately. Not what
+  # stops a sandbox node specifically (see this file's header comment): that's the
+  # firewall tag rule, since sandbox shares this list's own `services` entry.
   source_subnetwork_ip_ranges_to_nat = "LIST_OF_SUBNETWORKS"
 
   subnetwork {

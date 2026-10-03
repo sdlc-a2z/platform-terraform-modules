@@ -107,34 +107,26 @@ resource "google_service_networking_connection" "private_service_access" {
   reserved_peering_ranges = [google_compute_global_address.private_service_access.name]
 }
 
-resource "google_compute_subnetwork" "sandbox" {
-  name          = "${local.prefix}-sandbox"
-  project       = var.project_id
-  region        = var.region
-  network       = google_compute_network.vpc.id
-  ip_cidr_range = var.subnets.sandbox
-
-  # On, and this reverses what was written here before. ADR-0009.
-  #
-  # The old comment said a pod here could otherwise reach Secret Manager and Cloud Storage
-  # without leaving the VPC. That reasons about a *pod* and sets a control on a *subnet*,
-  # which is the confusion ADR-0008 exists to correct: this flag governs the node.
-  #
-  # Off, the node could pull no image from anywhere — no NAT, no Google, no internet — so
-  # the sandbox pool could not run a container at all, and the firewall's
-  # `sandbox-allow-google-apis` rule permitted a destination with no route to it.
-  #
-  # On, the node reaches 199.36.153.8/30 and nothing else: `restricted.googleapis.com`,
-  # which is the only destination the egress firewall permits besides the control plane
-  # and DNS. Not the internet, not even all of Google. The pod is still denied every
-  # egress by NetworkPolicy, and GKE_METADATA stops it borrowing the node's identity.
-  private_ip_google_access = true
-
-  # Full sampling: this is where untrusted, model-authored code runs, and the traffic
-  # volume is low enough that the cost is worth the record.
-  log_config {
-    aggregation_interval = "INTERVAL_5_SEC"
-    flow_sampling        = 1.0
-    metadata             = "INCLUDE_ALL_METADATA"
-  }
-}
+# R0-WS1-011: there used to be a `google_compute_subnetwork.sandbox` here, with
+# `private_ip_google_access = true` and full-sampling flow logs — ADR-0009's decision,
+# applied to the wrong resource. The GKE cluster takes exactly one subnetwork
+# (`environments/dev/main.tf`'s `subnetwork = module.network.subnets.services`), and every
+# node pool's primary NIC — sandbox included — is provisioned there, never here. Confirmed
+# live: a real sandbox-pool node's NIC is in `dev-aisdlc-services`, and
+# `dev-aisdlc-sandbox` carried zero instances the entire time this resource existed. The
+# PGA flag and the flow logs were both inert from the moment they were written — a GCP
+# API call that succeeded, attached to a resource nothing used, the same shape as
+# ADR-0009's own firewall-rule finding before it.
+#
+# What actually makes image pulls work for the real node (confirmed live): `services`
+# already had `private_ip_google_access = true` for unrelated reasons predating this
+# story, and the private DNS zones for `googleapis.com`/`pkg.dev` (below) resolve
+# correctly regardless of which subnet asks — those attach to the VPC, not to a subnet.
+# What actually contains the node (also confirmed, and ADR-0008's point exactly):
+# `firewall.tf`'s `target_tags = ["sandbox"]` rules, not subnet membership. Removing this
+# resource changes none of that, because none of that ever depended on it.
+#
+# The full-sampling flow-log intent ("this is where untrusted, model-authored code runs")
+# was real and is not replaced here — enabling it on `services` would log every other node
+# pool's traffic too, a different cost/scope tradeoff than a dedicated subnet's, and is a
+# separate decision this story doesn't make. Flagged, not silently dropped.
