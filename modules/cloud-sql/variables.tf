@@ -13,6 +13,19 @@ variable "environment" {
   type        = string
 }
 
+# R0-WS1-007: this module was called once (R0-WS1-004, the sixteen-service shared
+# instance) before Temporal needed a second, dedicated instance in the same environment —
+# ADR-0006's "its own Cloud SQL Postgres instance". The Cloud SQL instance name and the
+# admin-password secret ID are the only two names in this module that don't already vary
+# by database (`databases` does that via `each.key`), so they're the only two that would
+# collide across two calls with the same `environment`. Defaults to the exact name
+# R0-WS1-004's call already produces, so that call needs no change.
+variable "instance_name" {
+  description = "Cloud SQL instance id. Must be unique per call in the same environment."
+  type        = string
+  default     = null
+}
+
 variable "network_id" {
   description = <<-EOT
     The VPC's self-link. The instance's private IP is drawn from the Private Service

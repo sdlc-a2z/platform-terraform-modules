@@ -24,8 +24,12 @@
 # longer a `cloudsqlsuperuser` member, Postgres 16's real default (no CREATE on the public
 # schema for a non-owner role) applies as expected.
 
+locals {
+  instance_name = coalesce(var.instance_name, "${var.environment}-aisdlc")
+}
+
 resource "google_sql_database_instance" "main" {
-  name                = "${var.environment}-aisdlc"
+  name                = local.instance_name
   project             = var.project_id
   region              = var.region
   database_version    = "POSTGRES_16"
@@ -82,7 +86,7 @@ resource "google_sql_user" "admin" {
 }
 
 resource "google_secret_manager_secret" "admin_password" {
-  secret_id = "${var.environment}-cloudsql-admin-password"
+  secret_id = "${local.instance_name}-cloudsql-admin-password"
   project   = var.project_id
   replication {
     auto {}
